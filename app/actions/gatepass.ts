@@ -13,14 +13,16 @@ export async function createGatepassRequest(data: CreateGatepassRequest) {
       .from("gatepass_requests")
       .insert([
         {
+          student_id: data.student_id,
+          parent_id: data.parent_id,
           student_name: data.student_name,
           roll_number: data.roll_number,
           student_email: data.student_email || `${data.roll_number}@college.edu`,
-          destination: data.destination,
-          purpose: data.purpose,
-          departure_datetime: data.departure_datetime,
-          duration: data.duration,
           parent_email: data.parent_email,
+          reason: data.reason,
+          destination: data.destination,
+          departure_date_time: data.departure_date_time,
+          return_date_time: data.return_date_time,
           status: "Pending Parent Approval",
         },
       ])

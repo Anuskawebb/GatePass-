@@ -7,12 +7,10 @@
 // IMPORTANT: These are commented out to prevent breaking your current frontend.
 // Uncomment and integrate them when you're ready to connect to Supabase.
 
-import { createBrowserClient } from "@supabase/ssr"
+import { getSupabaseBrowserClient } from "@/lib/supabase/client"
 
 // Initialize Supabase client (browser-side)
-const getSupabaseClient = () => {
-  return createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
-}
+const getSupabaseClient = () => getSupabaseBrowserClient()
 
 // =====================================================
 // STUDENT FUNCTIONS
@@ -35,14 +33,16 @@ const getSupabaseClient = () => {
  * })
  */
 export async function insertRequest(requestData: {
+  student_id?: string
+  parent_id?: string
   student_name: string
   roll_number: string
-  student_email: string
-  destination: string
-  purpose: string
-  departure_datetime: string
-  duration: string
+  student_email?: string
   parent_email: string
+  reason: string
+  destination?: string
+  departure_date_time: string
+  return_date_time?: string
 }) {
   const supabase = getSupabaseClient()
 
@@ -56,15 +56,16 @@ export async function insertRequest(requestData: {
       .from("gatepass_requests")
       .insert([
         {
-          student_id: user?.id, // Optional: link to authenticated user
+          student_id: requestData.student_id || user?.id,
+          parent_id: requestData.parent_id,
           student_name: requestData.student_name,
           roll_number: requestData.roll_number,
           student_email: requestData.student_email,
-          destination: requestData.destination,
-          purpose: requestData.purpose,
-          departure_datetime: requestData.departure_datetime,
-          duration: requestData.duration,
           parent_email: requestData.parent_email,
+          reason: requestData.reason,
+          destination: requestData.destination,
+          departure_date_time: requestData.departure_date_time,
+          return_date_time: requestData.return_date_time,
           status: "Pending Parent Approval",
         },
       ])

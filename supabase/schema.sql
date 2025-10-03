@@ -1,68 +1,100 @@
 -- =====================================================
--- GateFlow Database Schema for Supabase
+-- GatePass Database Schema (from scratch, aligned with frontend)
 -- =====================================================
--- This file contains the complete database schema for the GateFlow gatepass management system.
--- Copy and paste this entire file into the Supabase SQL Editor to set up your database.
+-- Paste this entire file in the Supabase SQL Editor and run.
 
--- Enable UUID extension
+-- Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Optional reset for development: drop existing objects in dependency order
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notifications') THEN
+    DROP TABLE IF EXISTS notifications CASCADE;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='approvals') THEN
+    DROP TABLE IF EXISTS approvals CASCADE;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='gatepass_requests') THEN
+    DROP TABLE IF EXISTS gatepass_requests CASCADE;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='students') THEN
+    DROP TABLE IF EXISTS students CASCADE;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='parents') THEN
+    DROP TABLE IF EXISTS parents CASCADE;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='wardens') THEN
+    DROP TABLE IF EXISTS wardens CASCADE;
+  END IF;
+END $$;
 
 -- =====================================================
--- USERS TABLE
+-- Core Entities
 -- =====================================================
--- Stores user information with role-based access (student, parent, warden)
-CREATE TABLE IF NOT EXISTS users (
+
+CREATE TABLE students (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  email TEXT UNIQUE NOT NULL,
+  auth_user_id UUID,
   full_name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('student', 'parent', 'warden', 'security')),
+  email TEXT UNIQUE,
+  roll_number TEXT UNIQUE NOT NULL,
   phone TEXT,
-  roll_number TEXT UNIQUE, -- Only for students
-  parent_email TEXT, -- Links student to parent
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Ensure missing columns exist when rerunning schema
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS email TEXT,
-  ADD COLUMN IF NOT EXISTS full_name TEXT,
-  ADD COLUMN IF NOT EXISTS role TEXT,
-  ADD COLUMN IF NOT EXISTS roll_number TEXT UNIQUE,
-  ADD COLUMN IF NOT EXISTS parent_email TEXT,
-  ADD COLUMN IF NOT EXISTS phone TEXT,
-  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-
--- Index for faster lookups
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-CREATE INDEX IF NOT EXISTS idx_users_roll_number ON users(roll_number);
-
--- =====================================================
--- GATEPASS REQUESTS TABLE
--- =====================================================
--- Stores all gatepass requests with approval workflow
-CREATE TABLE IF NOT EXISTS gatepass_requests (
+CREATE TABLE parents (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  
-  -- Student Information
-  student_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  auth_user_id UUID,
+  full_name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  phone TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE wardens (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  auth_user_id UUID,
+  full_name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  phone TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- =====================================================
+-- GatePass Requests
+-- =====================================================
+
+CREATE TABLE gatepass_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+
+  -- Links
+  student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  parent_id UUID REFERENCES parents(id) ON DELETE SET NULL,
+  warden_id UUID REFERENCES wardens(id) ON DELETE SET NULL,
+
+  -- Denormalized for convenient frontend reads
   student_name TEXT NOT NULL,
   roll_number TEXT NOT NULL,
-  student_email TEXT NOT NULL,
-  
-  -- Request Details
-  destination TEXT NOT NULL,
-  purpose TEXT NOT NULL,
-  departure_datetime TIMESTAMPTZ NOT NULL,
-  duration TEXT NOT NULL,
-  
-  -- Parent Information
-  parent_email TEXT NOT NULL,
-  parent_approval_link TEXT, -- Unique link for parent approval
-  
-  -- Status and Approval Workflow
+  student_email TEXT,
+  parent_email TEXT,
+
+  -- Details
+  reason TEXT NOT NULL,
+  destination TEXT,
+  departure_date_time TIMESTAMPTZ NOT NULL,
+  return_date_time TIMESTAMPTZ,
+
+  -- Backward-compatibility fields (existing frontend may use these)
+  purpose TEXT,
+  departure_datetime TIMESTAMPTZ,
+  duration TEXT,
+
+  -- Workflow
   status TEXT NOT NULL DEFAULT 'Pending Parent Approval' CHECK (
     status IN (
       'Pending Parent Approval',
@@ -73,66 +105,53 @@ CREATE TABLE IF NOT EXISTS gatepass_requests (
       'Completed'
     )
   ),
-  
-  -- Approval Details
+  parent_approval_token TEXT UNIQUE,
   parent_approved_at TIMESTAMPTZ,
   parent_rejection_reason TEXT,
   warden_approved_at TIMESTAMPTZ,
-  warden_approved_by UUID REFERENCES users(id),
   warden_notes TEXT,
-  
-  -- Timestamps
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Ensure missing columns exist when rerunning schema
-ALTER TABLE gatepass_requests
-  ADD COLUMN IF NOT EXISTS student_id UUID,
-  ADD COLUMN IF NOT EXISTS student_name TEXT,
-  ADD COLUMN IF NOT EXISTS roll_number TEXT,
-  ADD COLUMN IF NOT EXISTS student_email TEXT,
-  ADD COLUMN IF NOT EXISTS destination TEXT,
-  ADD COLUMN IF NOT EXISTS purpose TEXT,
-  ADD COLUMN IF NOT EXISTS departure_datetime TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS duration TEXT,
-  ADD COLUMN IF NOT EXISTS parent_email TEXT,
-  ADD COLUMN IF NOT EXISTS parent_approval_link TEXT,
-  ADD COLUMN IF NOT EXISTS status TEXT,
-  ADD COLUMN IF NOT EXISTS parent_approved_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS parent_rejection_reason TEXT,
-  ADD COLUMN IF NOT EXISTS warden_approved_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS warden_approved_by UUID,
-  ADD COLUMN IF NOT EXISTS warden_notes TEXT,
-  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-
--- Ensure foreign key exists for student_id → users(id)
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'gatepass_requests_student_id_fkey'
-  ) THEN
-    ALTER TABLE gatepass_requests
-      ADD CONSTRAINT gatepass_requests_student_id_fkey
-      FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE;
-  END IF;
-END $$;
-
--- Indexes for faster queries
-CREATE INDEX IF NOT EXISTS idx_gatepass_student_id ON gatepass_requests(student_id);
-CREATE INDEX IF NOT EXISTS idx_gatepass_status ON gatepass_requests(status);
-CREATE INDEX IF NOT EXISTS idx_gatepass_parent_email ON gatepass_requests(parent_email);
-CREATE INDEX IF NOT EXISTS idx_gatepass_created_at ON gatepass_requests(created_at DESC);
+CREATE INDEX idx_gatepass_student_id ON gatepass_requests(student_id);
+CREATE INDEX idx_gatepass_status ON gatepass_requests(status);
+CREATE INDEX idx_gatepass_departure ON gatepass_requests(departure_date_time DESC);
 
 -- =====================================================
--- TRIGGERS
+-- Approvals and Notifications
 -- =====================================================
 
--- Trigger to automatically update 'updated_at' timestamp on users table
-CREATE OR REPLACE FUNCTION update_updated_at_column()
+CREATE TABLE approvals (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  request_id UUID NOT NULL REFERENCES gatepass_requests(id) ON DELETE CASCADE,
+  actor_type TEXT NOT NULL CHECK (actor_type IN ('parent','warden')),
+  actor_id UUID,
+  decision TEXT NOT NULL CHECK (decision IN ('approved','rejected')),
+  reason TEXT,
+  decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_approvals_request ON approvals(request_id);
+
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  request_id UUID NOT NULL REFERENCES gatepass_requests(id) ON DELETE CASCADE,
+  recipient_role TEXT NOT NULL CHECK (recipient_role IN ('parent','warden','student')),
+  recipient_email TEXT,
+  type TEXT NOT NULL CHECK (type IN ('parent_request','parent_decision','warden_notification')),
+  payload JSONB,
+  delivered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_notifications_request ON notifications(request_id);
+
+-- =====================================================
+-- Triggers
+-- =====================================================
+
+CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = NOW();
@@ -140,181 +159,143 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_users_updated_at
-  BEFORE UPDATE ON users
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER trg_students_updated
+BEFORE UPDATE ON students
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- Trigger to automatically update 'updated_at' timestamp on gatepass_requests table
-CREATE TRIGGER update_gatepass_requests_updated_at
-  BEFORE UPDATE ON gatepass_requests
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER trg_parents_updated
+BEFORE UPDATE ON parents
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- Trigger to generate unique parent approval link on INSERT
-CREATE OR REPLACE FUNCTION generate_parent_approval_link()
+CREATE TRIGGER trg_wardens_updated
+BEFORE UPDATE ON wardens
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_requests_updated
+BEFORE UPDATE ON gatepass_requests
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Keep compatibility fields in sync on INSERT
+CREATE OR REPLACE FUNCTION sync_request_compat_fields()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- Generate a unique approval link using the request ID
-  NEW.parent_approval_link = '/parent-approval/' || NEW.id::TEXT;
+  IF NEW.purpose IS NULL THEN
+    NEW.purpose = NEW.reason;
+  END IF;
+  IF NEW.departure_datetime IS NULL THEN
+    NEW.departure_datetime = NEW.departure_date_time;
+  END IF;
+  IF NEW.duration IS NULL AND NEW.return_date_time IS NOT NULL THEN
+    NEW.duration = CONCAT(EXTRACT(EPOCH FROM (NEW.return_date_time - NEW.departure_date_time))::INT, 's');
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER set_parent_approval_link
-  BEFORE INSERT ON gatepass_requests
-  FOR EACH ROW
-  EXECUTE FUNCTION generate_parent_approval_link();
+CREATE TRIGGER trg_requests_sync
+BEFORE INSERT ON gatepass_requests
+FOR EACH ROW EXECUTE FUNCTION sync_request_compat_fields();
+
+-- Generate parent approval token on INSERT (if not set)
+CREATE OR REPLACE FUNCTION set_parent_approval_token()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.parent_approval_token IS NULL THEN
+    NEW.parent_approval_token = encode(digest(NEW.id::text || ':' || NOW()::text, 'sha256'), 'hex');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_requests_token
+BEFORE INSERT ON gatepass_requests
+FOR EACH ROW EXECUTE FUNCTION set_parent_approval_token();
 
 -- =====================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
+-- RLS (open for development; tighten for production)
 -- =====================================================
 
--- Enable RLS on tables
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE students ENABLE ROW LEVEL SECURITY;
+ALTER TABLE parents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wardens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gatepass_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approvals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 
--- Users table policies
--- Allow users to read their own data
-CREATE POLICY "Users can view own profile"
-  ON users FOR SELECT
-  USING (auth.uid() = id);
-
--- Allow wardens and security to view all users
-CREATE POLICY "Wardens can view all users"
-  ON users FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.id = auth.uid()
-      AND users.role IN ('warden', 'security')
-    )
-  );
-
--- Gatepass requests policies
--- Students can view their own requests
-CREATE POLICY "Students can view own requests"
-  ON gatepass_requests FOR SELECT
-  USING (student_id = auth.uid());
-
--- Students can insert their own requests
-CREATE POLICY "Students can create requests"
-  ON gatepass_requests FOR INSERT
-  WITH CHECK (student_id = auth.uid());
-
--- Parents can view requests sent to their email
-CREATE POLICY "Parents can view requests for their email"
-  ON gatepass_requests FOR SELECT
-  USING (parent_email = (SELECT email FROM users WHERE id = auth.uid()));
-
--- Parents can update requests sent to their email (for approval/rejection)
-CREATE POLICY "Parents can update their requests"
-  ON gatepass_requests FOR UPDATE
-  USING (parent_email = (SELECT email FROM users WHERE id = auth.uid()));
-
--- Wardens and security can view all requests
-CREATE POLICY "Wardens can view all requests"
-  ON gatepass_requests FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.id = auth.uid()
-      AND users.role IN ('warden', 'security')
-    )
-  );
-
--- Wardens can update all requests (for final approval)
-CREATE POLICY "Wardens can update all requests"
-  ON gatepass_requests FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.id = auth.uid()
-      AND users.role IN ('warden', 'security')
-    )
-  );
+CREATE POLICY students_all ON students FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY parents_all ON parents FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY wardens_all ON wardens FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY requests_all ON gatepass_requests FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY approvals_all ON approvals FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY notifications_all ON notifications FOR ALL USING (true) WITH CHECK (true);
 
 -- =====================================================
--- SAMPLE DATA (Optional - for testing)
+-- Views / Helper Functions
 -- =====================================================
 
--- Insert sample users
-INSERT INTO users (email, full_name, role, roll_number, parent_email, phone) VALUES
-  ('student1@college.edu', 'Rahul Sharma', 'student', '2021CS001', 'parent1@gmail.com', '+91-9876543210'),
-  ('student2@college.edu', 'Priya Patel', 'student', '2021CS002', 'parent2@gmail.com', '+91-9876543211'),
-  ('parent1@gmail.com', 'Mr. Sharma', 'parent', NULL, NULL, '+91-9876543220'),
-  ('parent2@gmail.com', 'Mrs. Patel', 'parent', NULL, NULL, '+91-9876543221'),
-  ('warden@college.edu', 'Dr. Kumar', 'warden', NULL, NULL, '+91-9876543230'),
-  ('security@college.edu', 'Security Officer', 'security', NULL, NULL, '+91-9876543240')
+CREATE OR REPLACE VIEW v_warden_requests AS
+SELECT
+  r.id,
+  r.student_name,
+  r.roll_number,
+  r.student_email,
+  r.reason,
+  r.destination,
+  r.departure_date_time,
+  r.return_date_time,
+  r.status,
+  r.parent_approved_at,
+  r.parent_rejection_reason,
+  r.warden_notes,
+  r.created_at
+FROM gatepass_requests r
+WHERE r.status IN ('Pending Parent Approval','Approved by Parent');
+
+CREATE OR REPLACE FUNCTION get_student_requests(p_student_id UUID)
+RETURNS SETOF gatepass_requests AS $$
+BEGIN
+  RETURN QUERY
+  SELECT *
+  FROM gatepass_requests
+  WHERE student_id = p_student_id
+  ORDER BY created_at DESC;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- =====================================================
+-- Seed (optional for testing)
+-- =====================================================
+
+INSERT INTO parents (full_name, email, phone) VALUES
+  ('Mr. Sharma', 'parent1@gmail.com', '+91-9876543220'),
+  ('Mrs. Patel', 'parent2@gmail.com', '+91-9876543221')
 ON CONFLICT (email) DO NOTHING;
 
--- =====================================================
--- FUNCTIONS FOR COMMON QUERIES
--- =====================================================
+INSERT INTO students (full_name, email, roll_number, phone) VALUES
+  ('Rahul Sharma', 'student1@college.edu', '2021CS001', '+91-9876543210'),
+  ('Priya Patel', 'student2@college.edu', '2021CS002', '+91-9876543211')
+ON CONFLICT (roll_number) DO NOTHING;
 
--- Function to get all pending requests for warden dashboard
-CREATE OR REPLACE FUNCTION get_pending_requests_for_warden()
-RETURNS TABLE (
-  id UUID,
-  student_name TEXT,
-  roll_number TEXT,
-  destination TEXT,
-  purpose TEXT,
-  departure_datetime TIMESTAMPTZ,
-  status TEXT,
-  created_at TIMESTAMPTZ
-) AS $$
+INSERT INTO wardens (full_name, email, phone) VALUES
+  ('Dr. Kumar', 'warden@college.edu', '+91-9876543230')
+ON CONFLICT (email) DO NOTHING;
+
+DO $$
+DECLARE s_id UUID; p_id UUID;
 BEGIN
-  RETURN QUERY
-  SELECT 
-    gr.id,
-    gr.student_name,
-    gr.roll_number,
-    gr.destination,
-    gr.purpose,
-    gr.departure_datetime,
-    gr.status,
-    gr.created_at
-  FROM gatepass_requests gr
-  WHERE gr.status IN ('Approved by Parent', 'Pending Parent Approval')
-  ORDER BY gr.created_at DESC;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Function to get student's own requests
-CREATE OR REPLACE FUNCTION get_my_requests(student_user_id UUID)
-RETURNS TABLE (
-  id UUID,
-  destination TEXT,
-  purpose TEXT,
-  departure_datetime TIMESTAMPTZ,
-  duration TEXT,
-  status TEXT,
-  created_at TIMESTAMPTZ,
-  parent_approved_at TIMESTAMPTZ
-) AS $$
-BEGIN
-  RETURN QUERY
-  SELECT 
-    gr.id,
-    gr.destination,
-    gr.purpose,
-    gr.departure_datetime,
-    gr.duration,
-    gr.status,
-    gr.created_at,
-    gr.parent_approved_at
-  FROM gatepass_requests gr
-  WHERE gr.student_id = student_user_id
-  ORDER BY gr.created_at DESC;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+  SELECT id INTO s_id FROM students WHERE roll_number = '2021CS001';
+  SELECT id INTO p_id FROM parents WHERE email = 'parent1@gmail.com';
+  IF s_id IS NOT NULL THEN
+    INSERT INTO gatepass_requests (
+      student_id, parent_id, student_name, roll_number, student_email, parent_email,
+      reason, destination, departure_date_time, return_date_time, status
+    ) VALUES (
+      s_id, p_id, 'Rahul Sharma', '2021CS001', 'student1@college.edu', 'parent1@gmail.com',
+      'Family function', 'Home', NOW() + INTERVAL '1 day', NOW() + INTERVAL '3 days', 'Pending Parent Approval'
+    );
+  END IF;
+END $$;
 
 -- =====================================================
--- COMPLETION MESSAGE
+-- End of schema
 -- =====================================================
--- Schema setup complete! 
--- Next steps:
--- 1. Deploy the Edge Functions (notifyParent and notifyWarden)
--- 2. Configure email service in Supabase settings
--- 3. Update your frontend environment variables with Supabase URL and keys

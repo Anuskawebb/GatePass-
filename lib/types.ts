@@ -2,13 +2,16 @@ export interface GatepassRequest {
   id: string
   student_name: string
   roll_number: string
-  student_email?: string
-  destination: string
-  purpose: string
-  departure_datetime: string
-  duration: string
-  parent_email: string
-  parent_approval_link?: string
+  student_email?: string | null
+  parent_email?: string | null
+  reason: string
+  destination?: string | null
+  departure_date_time: string
+  return_date_time?: string | null
+  // Compatibility fields (present in DB for old UI)
+  purpose?: string | null
+  departure_datetime?: string | null
+  duration?: string | null
   status:
     | "Pending Parent Approval"
     | "Approved by Parent"
@@ -25,12 +28,14 @@ export interface GatepassRequest {
 }
 
 export interface CreateGatepassRequest {
+  student_id?: string // if available from auth-to-student mapping
+  parent_id?: string
   student_name: string
   roll_number: string
   student_email?: string
-  destination: string
-  purpose: string
-  departure_datetime: string
-  duration: string
   parent_email: string
+  reason: string
+  destination?: string
+  departure_date_time: string
+  return_date_time?: string
 }
